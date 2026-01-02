@@ -1,16 +1,20 @@
 import { useState } from 'react';
-import { BookOpen, Mail, Loader2 } from 'lucide-react';
+import { BookOpen, Mail, Loader2, KeyRound } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { useAuth } from '../../contexts/AuthContext';
 
+type AuthMode = 'signin' | 'signup' | 'magic';
+
 export function AuthPage() {
-  const { signInWithEmail } = useAuth();
+  const { signInWithEmail, signInWithPassword, signUpWithPassword } = useAuth();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<AuthMode>('signin');
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,6 +29,35 @@ export function AuthPage() {
       setError(error.message);
     } else {
       setEmailSent(true);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handlePasswordAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return;
+
+    setIsLoading(true);
+    setError('');
+
+    if (mode === 'signup') {
+      const { error } = await signUpWithPassword(email, password);
+      if (error) {
+        setError(error.message);
+      } else {
+        // Auto sign in after signup
+        const { error: signInError } = await signInWithPassword(email, password);
+        if (signInError) {
+          setError('Account created! Please sign in.');
+          setMode('signin');
+        }
+      }
+    } else {
+      const { error } = await signInWithPassword(email, password);
+      if (error) {
+        setError(error.message);
+      }
     }
 
     setIsLoading(false);
@@ -60,7 +93,7 @@ export function AuthPage() {
               Use a different email
             </Button>
           </div>
-        ) : (
+        ) : mode === 'magic' ? (
           <form onSubmit={handleEmailSignIn} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -84,6 +117,73 @@ export function AuthPage() {
               )}
               Send magic link
             </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-sm"
+              onClick={() => { setMode('signin'); setError(''); }}
+            >
+              Use password instead
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={handlePasswordAuth} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
+                minLength={6}
+              />
+            </div>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <KeyRound className="h-4 w-4 mr-2" />
+              )}
+              {mode === 'signup' ? 'Create account' : 'Sign in'}
+            </Button>
+
+            <div className="flex items-center justify-between text-sm">
+              <Button
+                type="button"
+                variant="link"
+                className="p-0 h-auto"
+                onClick={() => {
+                  setMode(mode === 'signin' ? 'signup' : 'signin');
+                  setError('');
+                }}
+              >
+                {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}
+              </Button>
+              <Button
+                type="button"
+                variant="link"
+                className="p-0 h-auto"
+                onClick={() => { setMode('magic'); setError(''); }}
+              >
+                Use magic link
+              </Button>
+            </div>
           </form>
         )}
 
