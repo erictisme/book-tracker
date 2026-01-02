@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { BookOpen, Plus, Grid, List, Upload, BarChart3, Search, LogOut, Loader2, Check, Book as BookIcon, Trash2, X, HelpCircle, Clock, Pause, Tag, Copy, Star } from 'lucide-react';
+import { BookOpen, Plus, Grid, List, Upload, BarChart3, Search, LogOut, Loader2, Check, Book as BookIcon, Trash2, X, HelpCircle, Clock, Pause, Tag, Copy, Star, Brain } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs';
 import {
@@ -71,6 +71,7 @@ function MainApp() {
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [duplicateFinderOpen, setDuplicateFinderOpen] = useState(false);
+  const [showCurrentlyReading, setShowCurrentlyReading] = useState(true);
 
   const handleAddBook = (input: CreateBookInput) => {
     addBook(input);
@@ -271,6 +272,11 @@ function MainApp() {
                   <YearStats books={books} />
                 </DialogContent>
               </Dialog>
+
+              <Button variant="outline" onClick={() => setTagManagerOpen(true)}>
+                <Brain className="h-4 w-4 mr-2" />
+                AI Tag
+              </Button>
 
               <Dialog open={importOpen} onOpenChange={setImportOpen}>
                 <DialogTrigger asChild>
@@ -551,42 +557,48 @@ function MainApp() {
         {/* Currently Reading - Quick access */}
         {filterStatus === 'all' && books.filter(b => b.status === 'reading').length > 0 && (
           <div className="mb-6 p-4 bg-yellow-50 dark:bg-yellow-950/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
-            <h2 className="text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-3 flex items-center gap-2">
+            <button
+              className="w-full text-sm font-medium text-yellow-800 dark:text-yellow-200 mb-3 flex items-center gap-2"
+              onClick={() => setShowCurrentlyReading(!showCurrentlyReading)}
+            >
               <BookOpen className="h-4 w-4" />
-              Currently Reading
-            </h2>
-            <div className="flex flex-wrap gap-3">
-              {books.filter(b => b.status === 'reading').map(book => (
-                <div
-                  key={book.id}
-                  className="flex items-center gap-3 bg-white dark:bg-gray-900 rounded-lg p-2 pr-3 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-                  onClick={() => setEditingBook(book)}
-                >
-                  {book.cover_url ? (
-                    <img src={book.cover_url} alt={book.title} className="w-10 h-14 object-cover rounded" />
-                  ) : (
-                    <div className="w-10 h-14 bg-muted rounded flex items-center justify-center">
-                      <BookIcon className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm truncate max-w-[150px]">{book.title}</p>
-                    <p className="text-xs text-muted-foreground truncate max-w-[150px]">{book.authors[0]}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="ml-2 bg-green-500 hover:bg-green-600 text-white h-8"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStatusChange(book.id, 'finished');
-                    }}
+              Currently Reading ({books.filter(b => b.status === 'reading').length})
+              <span className="ml-auto text-xs">{showCurrentlyReading ? '▼' : '▶'}</span>
+            </button>
+            {showCurrentlyReading && (
+              <div className="flex flex-wrap gap-3">
+                {books.filter(b => b.status === 'reading').map(book => (
+                  <div
+                    key={book.id}
+                    className="flex items-center gap-3 bg-white dark:bg-gray-900 rounded-lg p-2 pr-3 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                    onClick={() => setEditingBook(book)}
                   >
-                    <Check className="h-3 w-3 mr-1" />
-                    Finish
-                  </Button>
-                </div>
-              ))}
-            </div>
+                    {book.cover_url ? (
+                      <img src={book.cover_url} alt={book.title} className="w-10 h-14 object-cover rounded" />
+                    ) : (
+                      <div className="w-10 h-14 bg-muted rounded flex items-center justify-center">
+                        <BookIcon className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate max-w-[150px]">{book.title}</p>
+                      <p className="text-xs text-muted-foreground truncate max-w-[150px]">{book.authors[0]}</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="ml-2 bg-green-500 hover:bg-green-600 text-white h-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStatusChange(book.id, 'finished');
+                      }}
+                    >
+                      <Check className="h-3 w-3 mr-1" />
+                      Finish
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

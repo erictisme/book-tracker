@@ -47,14 +47,17 @@ export function FinishDateDialog({ open, bookTitle, dateAdded, onConfirm, onCanc
   // Default to 1 month after date_added, or current date if no date_added
   const defaultDate = useMemo(() => {
     if (dateAdded) {
+      // Handle various date formats (ISO, timestamp, etc.)
       const added = new Date(dateAdded);
-      added.setMonth(added.getMonth() + 1);
-      // Cap at current date (don't suggest future dates)
-      const now = new Date();
-      if (added > now) {
-        return now;
+      if (!isNaN(added.getTime())) {
+        added.setMonth(added.getMonth() + 1);
+        // Cap at current date (don't suggest future dates)
+        const now = new Date();
+        if (added > now) {
+          return now;
+        }
+        return added;
       }
-      return added;
     }
     return new Date();
   }, [dateAdded]);
