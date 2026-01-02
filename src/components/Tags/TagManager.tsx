@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
-import { Tag, Pencil, Trash2, Plus, Sparkles, X, Check } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { Tag, Pencil, Trash2, Plus, Sparkles, X, Check, Loader2, Brain, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Label } from '../ui/label';
+import { Checkbox } from '../ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -13,10 +14,22 @@ import {
 } from '../ui/dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '../ui/collapsible';
 import type { Book } from '../../types/book';
+import {
+  DEFAULT_CATEGORIES,
+  isAITaggingAvailable,
+  tagBooksWithAI,
+  type TagSuggestion,
+} from '../../services/aiTagger';
 
 interface TagManagerProps {
   books: Book[];
+  selectedBookIds?: Set<string>;
   onUpdateBookTags: (bookId: string, tags: string[]) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -104,12 +117,22 @@ export function suggestTagsForBook(book: Book): string[] {
   return Array.from(suggestions);
 }
 
-export function TagManager({ books, onUpdateBookTags, open, onOpenChange }: TagManagerProps) {
+export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onOpenChange }: TagManagerProps) {
   const [editingTag, setEditingTag] = useState<string | null>(null);
   const [newTagName, setNewTagName] = useState('');
   const [selectedBooksForTag, setSelectedBooksForTag] = useState<Set<string>>(new Set());
   const [addingNewTag, setAddingNewTag] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
+
+  // AI Tagging state
+  const [aiCategories, setAiCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiProgress, setAiProgress] = useState({ processed: 0, total: 0 });
+  const [aiSuggestions, setAiSuggestions] = useState<TagSuggestion[]>([]);
+  const [aiPreviewOpen, setAiPreviewOpen] = useState(false);
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
 
   // Calculate all unique tags with counts and book lists
   const tagData = useMemo(() => {
@@ -196,6 +219,81 @@ export function TagManager({ books, onUpdateBookTags, open, onOpenChange }: TagM
     return updatedCount;
   };
 
+  // AI Tagging functions
+  const booksToTag = useMemo(() => {
+    if (selectedBookIds && selectedBookIds.size > 0) {
+      return books.filter(b => selectedBookIds.has(b.id));
+    }
+    return books;
+  }, [books, selectedBookIds]);
+
+  const handleAddCategory = useCallback(() => {
+    const trimmed = newCategoryInput.trim().toLowerCase();
+    if (trimmed && !aiCategories.includes(trimmed)) {
+      setAiCategories(prev => [...prev, trimmed]);
+      setNewCategoryInput('');
+    }
+  }, [newCategoryInput, aiCategories]);
+
+  const handleRemoveCategory = useCallback((cat: string) => {
+    setAiCategories(prev => prev.filter(c => c !== cat));
+  }, []);
+
+  const handleAITag = useCallback(async (tagAll: boolean) => {
+    const targetBooks = tagAll ? books : booksToTag;
+    if (targetBooks.length === 0) return;
+
+    setAiLoading(true);
+    setAiProgress({ processed: 0, total: targetBooks.length });
+
+    try {
+      const result = await tagBooksWithAI(
+        targetBooks,
+        aiCategories,
+        (processed, total) => setAiProgress({ processed, total })
+      );
+
+      setAiSuggestions(result.suggestions);
+      // Pre-select all suggestions
+      setSelectedSuggestions(new Set(result.suggestions.map(s => s.bookId)));
+      setAiPreviewOpen(true);
+    } catch (error) {
+      console.error('AI tagging error:', error);
+    } finally {
+      setAiLoading(false);
+    }
+  }, [books, booksToTag, aiCategories]);
+
+  const handleApplySuggestions = useCallback(() => {
+    aiSuggestions.forEach(suggestion => {
+      if (selectedSuggestions.has(suggestion.bookId)) {
+        const book = books.find(b => b.id === suggestion.bookId);
+        if (book) {
+          const currentTags = book.tags || [];
+          const newTags = suggestion.suggestedTags.filter(t => !currentTags.includes(t));
+          if (newTags.length > 0) {
+            onUpdateBookTags(suggestion.bookId, [...currentTags, ...newTags]);
+          }
+        }
+      }
+    });
+    setAiSuggestions([]);
+    setAiPreviewOpen(false);
+    setSelectedSuggestions(new Set());
+  }, [aiSuggestions, selectedSuggestions, books, onUpdateBookTags]);
+
+  const toggleSuggestionSelection = useCallback((bookId: string) => {
+    setSelectedSuggestions(prev => {
+      const next = new Set(prev);
+      if (next.has(bookId)) {
+        next.delete(bookId);
+      } else {
+        next.add(bookId);
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh]">
@@ -211,27 +309,233 @@ export function TagManager({ books, onUpdateBookTags, open, onOpenChange }: TagM
 
         <ScrollArea className="max-h-[60vh] pr-4">
           <div className="space-y-6">
-            {/* Auto-tag section */}
-            <div className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-medium flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-purple-600" />
-                    Auto-Tag Books
-                  </h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Automatically suggest tags based on book genres and titles
-                  </p>
+            {/* AI Tagging Section */}
+            {isAITaggingAvailable() && !aiPreviewOpen && (
+              <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-medium flex items-center gap-2">
+                        <Brain className="h-4 w-4 text-blue-600" />
+                        AI Auto-Categorize
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {selectedBookIds && selectedBookIds.size > 0
+                          ? `Tag ${selectedBookIds.size} selected book${selectedBookIds.size === 1 ? '' : 's'}`
+                          : `Analyze all ${books.length} books with AI`}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      {selectedBookIds && selectedBookIds.size > 0 && (
+                        <Button
+                          onClick={() => handleAITag(false)}
+                          disabled={aiLoading}
+                          variant="outline"
+                        >
+                          {aiLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              {aiProgress.processed}/{aiProgress.total}
+                            </>
+                          ) : (
+                            <>
+                              <Brain className="h-4 w-4 mr-2" />
+                              Tag Selected
+                            </>
+                          )}
+                        </Button>
+                      )}
+                      <Button
+                        onClick={() => handleAITag(true)}
+                        disabled={aiLoading}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        {aiLoading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            {aiProgress.processed}/{aiProgress.total}
+                          </>
+                        ) : (
+                          <>
+                            <Brain className="h-4 w-4 mr-2" />
+                            Tag All ({books.length})
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Categories collapsible */}
+                  <Collapsible open={categoriesExpanded} onOpenChange={setCategoriesExpanded}>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="sm" className="w-full justify-between">
+                        <span className="text-xs text-muted-foreground">
+                          Categories: {aiCategories.length} tags
+                        </span>
+                        {categoriesExpanded ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="pt-2 space-y-2">
+                      <div className="flex flex-wrap gap-1">
+                        {aiCategories.map(cat => (
+                          <Badge
+                            key={cat}
+                            variant="secondary"
+                            className="text-xs cursor-pointer hover:bg-destructive/20"
+                            onClick={() => handleRemoveCategory(cat)}
+                          >
+                            {cat}
+                            <X className="h-3 w-3 ml-1" />
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Add category..."
+                          value={newCategoryInput}
+                          onChange={e => setNewCategoryInput(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                          className="h-8 text-xs"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleAddCategory}
+                          disabled={!newCategoryInput.trim()}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 </div>
-                <Button
-                  onClick={() => handleAutoSuggestAll()}
-                  className="bg-purple-600 hover:bg-purple-700"
-                >
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Auto-Tag All
-                </Button>
               </div>
-            </div>
+            )}
+
+            {/* AI Preview Section */}
+            {aiPreviewOpen && aiSuggestions.length > 0 && (
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 rounded-lg p-4 border border-green-200 dark:border-green-800">
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-medium flex items-center gap-2">
+                        <Eye className="h-4 w-4 text-green-600" />
+                        Preview AI Suggestions
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {selectedSuggestions.size} of {aiSuggestions.length} books selected
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setAiPreviewOpen(false);
+                          setAiSuggestions([]);
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={handleApplySuggestions}
+                        disabled={selectedSuggestions.size === 0}
+                      >
+                        <Check className="h-4 w-4 mr-2" />
+                        Apply Tags
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Select all / none */}
+                  <div className="flex gap-2 text-xs">
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0"
+                      onClick={() => setSelectedSuggestions(new Set(aiSuggestions.map(s => s.bookId)))}
+                    >
+                      Select all
+                    </Button>
+                    <span className="text-muted-foreground">|</span>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0"
+                      onClick={() => setSelectedSuggestions(new Set())}
+                    >
+                      Select none
+                    </Button>
+                  </div>
+
+                  {/* Suggestions list */}
+                  <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                    {aiSuggestions.map(suggestion => (
+                      <div
+                        key={suggestion.bookId}
+                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                          selectedSuggestions.has(suggestion.bookId)
+                            ? 'bg-green-100 dark:bg-green-900/30'
+                            : 'bg-muted/30 hover:bg-muted/50'
+                        }`}
+                        onClick={() => toggleSuggestionSelection(suggestion.bookId)}
+                      >
+                        <Checkbox
+                          checked={selectedSuggestions.has(suggestion.bookId)}
+                          onCheckedChange={() => toggleSuggestionSelection(suggestion.bookId)}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{suggestion.title}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {suggestion.suggestedTags.map(tag => (
+                              <Badge key={tag} variant="outline" className="text-xs">
+                                {tag}
+                              </Badge>
+                            ))}
+                            <span className={`text-xs ${
+                              suggestion.confidence === 'high' ? 'text-green-600' :
+                              suggestion.confidence === 'medium' ? 'text-yellow-600' : 'text-red-600'
+                            }`}>
+                              ({suggestion.confidence})
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Rule-based Auto-tag section */}
+            {!aiPreviewOpen && (
+              <div className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-medium flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-purple-600" />
+                      Quick Auto-Tag (Rule-Based)
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Fast tagging based on genre data - no AI needed
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => handleAutoSuggestAll()}
+                    variant="outline"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Quick Tag
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <Separator />
 

@@ -31,7 +31,7 @@ interface ImportPageProps {
   onUpdateHighlights?: (bookId: string, highlights: string[]) => void;
 }
 
-type ImportSource = 'goodreads' | 'libby' | 'kindle' | 'kobo' | 'highlights';
+type ImportSource = 'goodreads' | 'libby' | 'kindle' | 'kobo' | 'other' | 'highlights';
 
 export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHighlights }: ImportPageProps) {
   const [activeTab, setActiveTab] = useState<ImportSource>('goodreads');
@@ -40,6 +40,8 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
   const [error, setError] = useState<string | null>(null);
   const [kindleText, setKindleText] = useState('');
   const [koboText, setKoboText] = useState('');
+  const [otherText, setOtherText] = useState('');
+  const [otherSource, setOtherSource] = useState('audible');
   const [isDragging, setIsDragging] = useState(false);
   const [highlightsPreview, setHighlightsPreview] = useState<BookHighlights[]>([]);
   const [highlightResult, setHighlightResult] = useState<HighlightImportResult | null>(null);
@@ -194,7 +196,7 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
     }, 500);
   }, []);
 
-  const handleAIParse = useCallback(async (text: string, source: 'kobo' | 'kindle') => {
+  const handleAIParse = useCallback(async (text: string, source: 'kobo' | 'kindle' | 'generic') => {
     if (!text.trim()) return;
 
     setIsAIParsing(true);
@@ -209,6 +211,53 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
       setIsAIParsing(false);
     }
   }, []);
+
+  // Debounce timer ref for "other" input
+  const otherDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleOtherTextChange = useCallback((text: string) => {
+    setOtherText(text);
+    setError(null);
+    setResult(null);
+
+    // Clear existing debounce
+    if (otherDebounceRef.current) {
+      clearTimeout(otherDebounceRef.current);
+    }
+
+    if (!text.trim()) {
+      setPreview([]);
+      return;
+    }
+
+    // Always use AI parsing for "other" sources (1s debounce for longer)
+    otherDebounceRef.current = setTimeout(async () => {
+      if (!isAIParsingAvailable()) {
+        setError('AI parsing is not available. Please configure the Gemini API key.');
+        return;
+      }
+
+      setIsAIParsing(true);
+      setError(null);
+
+      try {
+        const books = await parseWithAI(text, 'generic');
+        // Set the source based on selected source
+        const booksWithSource = books.map(b => ({
+          ...b,
+          source: otherSource === 'audible' ? 'kindle' as const :
+                  otherSource === 'libro' ? 'libro' as const :
+                  'paste' as const,
+        }));
+        setPreview(booksWithSource);
+      } catch (err) {
+        setError(`AI parsing failed: ${err}`);
+        setPreview([]);
+      } finally {
+        setIsAIParsing(false);
+      }
+    }, 1000);
+  }, [otherSource]);
 
   const handleImport = useCallback(async () => {
     if (preview.length === 0) return;
@@ -239,6 +288,7 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
     setPreview([]);
     setKindleText('');
     setKoboText('');
+    setOtherText('');
   }, [preview, onImport, enrichEnabled]);
 
   const handleImportHighlights = useCallback(() => {
@@ -316,11 +366,12 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
         setHighlightResult(null);
         setError(null);
       }}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="goodreads">Goodreads</TabsTrigger>
           <TabsTrigger value="libby">Libby</TabsTrigger>
           <TabsTrigger value="kindle">Kindle</TabsTrigger>
           <TabsTrigger value="kobo">Kobo</TabsTrigger>
+          <TabsTrigger value="other">Other</TabsTrigger>
           <TabsTrigger value="highlights">Highlights</TabsTrigger>
         </TabsList>
 
@@ -476,6 +527,64 @@ Unread
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     Using AI to parse...
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Other Tab - AI Powered */}
+        <TabsContent value="other">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-amber-500" />
+                Import from Any Source (AI)
+              </CardTitle>
+              <CardDescription>
+                Paste your book list from Audible, Libro.fm, Apple Books, or any other app.
+                AI will automatically detect and parse the book titles and authors.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Source selector */}
+              <div className="flex items-center gap-2">
+                <Label htmlFor="source-select" className="text-sm">Source:</Label>
+                <select
+                  id="source-select"
+                  value={otherSource}
+                  onChange={(e) => setOtherSource(e.target.value)}
+                  className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                >
+                  <option value="audible">Audible</option>
+                  <option value="libro">Libro.fm</option>
+                  <option value="apple">Apple Books</option>
+                  <option value="scribd">Scribd</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <Textarea
+                placeholder="Paste your book list here...
+
+Example formats AI can understand:
+- Title by Author
+- Title - Author
+- 1. Title (Author)
+- Any list format - AI will figure it out!"
+                value={otherText}
+                onChange={(e) => handleOtherTextChange(e.target.value)}
+                rows={10}
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">
+                  AI will detect titles and authors from any format.
+                </p>
+                {isAIParsing && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    AI is parsing...
                   </span>
                 )}
               </div>

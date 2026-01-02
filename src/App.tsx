@@ -664,6 +664,7 @@ function MainApp() {
 
       <TagManager
         books={books}
+        selectedBookIds={selectedIds}
         onUpdateBookTags={handleUpdateBookTags}
         open={tagManagerOpen}
         onOpenChange={setTagManagerOpen}
