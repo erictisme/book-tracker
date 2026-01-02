@@ -136,7 +136,7 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
   }, []);
 
   // Debounce timer ref
-  const koboDebounceRef = React.useRef<NodeJS.Timeout | null>(null);
+  const koboDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleKoboTextChange = useCallback((text: string) => {
     setKoboText(text);
