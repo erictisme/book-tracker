@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ import { Label } from '../ui/label';
 interface FinishDateDialogProps {
   open: boolean;
   bookTitle: string;
+  dateAdded?: string; // ISO date string - used to default to 1 month after
   onConfirm: (date: string | null) => void; // null = use current date
   onCancel: () => void;
 }
@@ -42,10 +43,32 @@ const months = [
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: currentYear - 2009 }, (_, i) => currentYear - i);
 
-export function FinishDateDialog({ open, bookTitle, onConfirm, onCancel }: FinishDateDialogProps) {
-  const now = new Date();
-  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, '0'));
-  const [year, setYear] = useState(String(now.getFullYear()));
+export function FinishDateDialog({ open, bookTitle, dateAdded, onConfirm, onCancel }: FinishDateDialogProps) {
+  // Default to 1 month after date_added, or current date if no date_added
+  const defaultDate = useMemo(() => {
+    if (dateAdded) {
+      const added = new Date(dateAdded);
+      added.setMonth(added.getMonth() + 1);
+      // Cap at current date (don't suggest future dates)
+      const now = new Date();
+      if (added > now) {
+        return now;
+      }
+      return added;
+    }
+    return new Date();
+  }, [dateAdded]);
+
+  const [month, setMonth] = useState(String(defaultDate.getMonth() + 1).padStart(2, '0'));
+  const [year, setYear] = useState(String(defaultDate.getFullYear()));
+
+  // Reset to default when dialog opens with new dateAdded
+  useEffect(() => {
+    if (open) {
+      setMonth(String(defaultDate.getMonth() + 1).padStart(2, '0'));
+      setYear(String(defaultDate.getFullYear()));
+    }
+  }, [open, defaultDate]);
 
   const handleConfirm = () => {
     // Create date as last day of the month (since we only have month/year)

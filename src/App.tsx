@@ -65,7 +65,7 @@ function MainApp() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [editingBook, setEditingBook] = useState<Book | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [finishingBook, setFinishingBook] = useState<{ id: string; title: string } | null>(null);
+  const [finishingBook, setFinishingBook] = useState<{ id: string; title: string; dateAdded?: string } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
@@ -83,7 +83,7 @@ function MainApp() {
 
     if (status === 'finished') {
       // Show date picker dialog for finish date
-      setFinishingBook({ id, title: book.title });
+      setFinishingBook({ id, title: book.title, dateAdded: book.date_added });
     } else {
       updateStatus(id, status);
       toast.success(`Marked "${book.title}" as ${status.replace(/-/g, ' ')}`);
@@ -642,6 +642,7 @@ function MainApp() {
       <FinishDateDialog
         open={!!finishingBook}
         bookTitle={finishingBook?.title || ''}
+        dateAdded={finishingBook?.dateAdded}
         onConfirm={handleFinishConfirm}
         onCancel={() => setFinishingBook(null)}
       />
