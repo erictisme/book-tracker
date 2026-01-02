@@ -690,8 +690,90 @@ function App() {
   );
 }
 
+function PasswordResetForm() {
+  const { updatePassword } = useAuth();
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+
+    const { error } = await updatePassword(password);
+    if (error) {
+      setError(error.message);
+    } else {
+      toast.success('Password updated successfully!');
+    }
+    setIsLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="flex flex-col items-center gap-2">
+          <BookOpen className="h-12 w-12" />
+          <h1 className="text-2xl font-bold">Set New Password</h1>
+          <p className="text-muted-foreground text-center">
+            Enter your new password below
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="password" className="text-sm font-medium">New Password</label>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              minLength={6}
+            />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="confirmPassword" className="text-sm font-medium">Confirm Password</label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              placeholder="••••••••"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={isLoading}
+              minLength={6}
+            />
+          </div>
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : null}
+            Update Password
+          </Button>
+        </form>
+      </div>
+      <Toaster position="bottom-right" />
+    </div>
+  );
+}
+
 function AppContent() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isRecovery } = useAuth();
 
   if (isLoading) {
     return (
@@ -699,6 +781,10 @@ function AppContent() {
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+
+  if (isRecovery && user) {
+    return <PasswordResetForm />;
   }
 
   if (!user) {
