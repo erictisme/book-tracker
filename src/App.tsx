@@ -57,7 +57,7 @@ type FilterSource = 'all' | BookSource;
 function MainApp() {
   const { user, signOut } = useAuth();
   const { books, addBook, updateBook, updateStatus, deleteBook, bulkAddBooks, bulkUpdateStatus, bulkDeleteBooks, findDuplicates } = useBooks();
-  const [viewMode, setViewMode] = useState<ViewMode>('grid');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterSource, setFilterSource] = useState<FilterSource>('all');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -529,18 +529,20 @@ function MainApp() {
             {/* View toggle */}
             <div className="flex gap-1">
             <Button
-              variant={viewMode === 'grid' ? 'default' : 'outline'}
-              size="icon"
-              onClick={() => setViewMode('grid')}
-            >
-              <Grid className="h-4 w-4" />
-            </Button>
-            <Button
               variant={viewMode === 'list' ? 'default' : 'outline'}
               size="icon"
               onClick={() => setViewMode('list')}
+              title="List view"
             >
               <List className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === 'grid' ? 'default' : 'outline'}
+              size="icon"
+              onClick={() => setViewMode('grid')}
+              title="Grid view"
+            >
+              <Grid className="h-4 w-4" />
             </Button>
             </div>
           </div>
