@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Tag, Pencil, Trash2, Plus, Sparkles, X, Check, Loader2, Brain, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -124,9 +124,28 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
   const [addingNewTag, setAddingNewTag] = useState(false);
   const [newTagInput, setNewTagInput] = useState('');
 
-  // AI Tagging state
-  const [aiCategories, setAiCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  // Get existing tags from books as default categories
+  const existingTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    books.forEach(book => book.tags?.forEach(tag => tagSet.add(tag)));
+    return Array.from(tagSet).sort();
+  }, [books]);
+
+  // AI Tagging state - use existing tags, or fall back to defaults if no tags exist
+  const [aiCategories, setAiCategories] = useState<string[]>([]);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+
+  // Initialize categories from existing tags when dialog opens
+  useEffect(() => {
+    if (open && aiCategories.length === 0) {
+      if (existingTags.length > 0) {
+        setAiCategories(existingTags);
+      } else {
+        // Only use defaults if no existing tags
+        setAiCategories(DEFAULT_CATEGORIES.slice(0, 10)); // Start with fewer defaults
+      }
+    }
+  }, [open, existingTags, aiCategories.length]);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiProgress, setAiProgress] = useState({ processed: 0, total: 0 });
   const [aiSuggestions, setAiSuggestions] = useState<TagSuggestion[]>([]);
