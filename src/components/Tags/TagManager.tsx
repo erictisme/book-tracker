@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Tag, Pencil, Trash2, Plus, Sparkles, X, Check, Loader2, Brain, Eye, ChevronDown, ChevronUp } from 'lucide-react';
+import { Tag, Pencil, Trash2, Plus, X, Check, Loader2, Brain, Eye } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -14,11 +14,6 @@ import {
 } from '../ui/dialog';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '../ui/collapsible';
 import type { Book } from '../../types/book';
 import {
   DEFAULT_CATEGORIES,
@@ -151,7 +146,6 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
   const [aiSuggestions, setAiSuggestions] = useState<TagSuggestion[]>([]);
   const [aiPreviewOpen, setAiPreviewOpen] = useState(false);
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
-  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
 
   // Calculate all unique tags with counts and book lists
   const tagData = useMemo(() => {
@@ -220,22 +214,6 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
     setSelectedBooksForTag(new Set());
     setAddingNewTag(false);
     setNewTagInput('');
-  };
-
-  const handleAutoSuggestAll = () => {
-    let updatedCount = 0;
-    books.forEach(book => {
-      const suggestions = suggestTagsForBook(book);
-      if (suggestions.length > 0) {
-        const currentTags = book.tags || [];
-        const newTags = suggestions.filter(t => !currentTags.includes(t));
-        if (newTags.length > 0) {
-          onUpdateBookTags(book.id, [...currentTags, ...newTags]);
-          updatedCount++;
-        }
-      }
-    });
-    return updatedCount;
   };
 
   // AI Tagging functions
@@ -332,41 +310,62 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
             {isAITaggingAvailable() && !aiPreviewOpen && (
               <div className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
                 <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="font-medium flex items-center gap-2">
-                        <Brain className="h-4 w-4 text-blue-600" />
-                        AI Auto-Categorize
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {selectedBookIds && selectedBookIds.size > 0
-                          ? `Tag ${selectedBookIds.size} selected book${selectedBookIds.size === 1 ? '' : 's'}`
-                          : `Analyze all ${books.length} books with AI`}
-                      </p>
+                  {/* Step 1: Categories */}
+                  <div>
+                    <h3 className="font-medium flex items-center gap-2 mb-2">
+                      <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded">1</span>
+                      Choose categories to tag with
+                    </h3>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {aiCategories.map(cat => (
+                        <Badge
+                          key={cat}
+                          variant="secondary"
+                          className="text-xs cursor-pointer hover:bg-destructive/20"
+                          onClick={() => handleRemoveCategory(cat)}
+                        >
+                          {cat}
+                          <X className="h-3 w-3 ml-1" />
+                        </Badge>
+                      ))}
+                      {aiCategories.length === 0 && (
+                        <span className="text-xs text-muted-foreground">No categories - add some below</span>
+                      )}
                     </div>
                     <div className="flex gap-2">
-                      {selectedBookIds && selectedBookIds.size > 0 && (
-                        <Button
-                          onClick={() => handleAITag(false)}
-                          disabled={aiLoading}
-                          variant="outline"
-                        >
-                          {aiLoading ? (
-                            <>
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                              {aiProgress.processed}/{aiProgress.total}
-                            </>
-                          ) : (
-                            <>
-                              <Brain className="h-4 w-4 mr-2" />
-                              Tag Selected
-                            </>
-                          )}
-                        </Button>
-                      )}
+                      <Input
+                        placeholder="Add category (e.g., fiction, theology, business)..."
+                        value={newCategoryInput}
+                        onChange={e => setNewCategoryInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+                        className="h-8 text-sm"
+                      />
                       <Button
-                        onClick={() => handleAITag(true)}
-                        disabled={aiLoading}
+                        size="sm"
+                        variant="outline"
+                        onClick={handleAddCategory}
+                        disabled={!newCategoryInput.trim()}
+                      >
+                        <Plus className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Tag Books */}
+                  <div className="pt-2 border-t">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium flex items-center gap-2">
+                          <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded">2</span>
+                          Tag your books
+                        </h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          AI will assign categories to {selectedBookIds && selectedBookIds.size > 0 ? `${selectedBookIds.size} selected` : 'all'} books
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => handleAITag(selectedBookIds && selectedBookIds.size > 0 ? false : true)}
+                        disabled={aiLoading || aiCategories.length === 0}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         {aiLoading ? (
@@ -377,60 +376,14 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
                         ) : (
                           <>
                             <Brain className="h-4 w-4 mr-2" />
-                            Tag All ({books.length})
+                            {selectedBookIds && selectedBookIds.size > 0
+                              ? `Tag ${selectedBookIds.size} Books`
+                              : `Tag All ${books.length} Books`}
                           </>
                         )}
                       </Button>
                     </div>
                   </div>
-
-                  {/* Categories collapsible */}
-                  <Collapsible open={categoriesExpanded} onOpenChange={setCategoriesExpanded}>
-                    <CollapsibleTrigger asChild>
-                      <Button variant="ghost" size="sm" className="w-full justify-between">
-                        <span className="text-xs text-muted-foreground">
-                          Categories: {aiCategories.length} tags
-                        </span>
-                        {categoriesExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="pt-2 space-y-2">
-                      <div className="flex flex-wrap gap-1">
-                        {aiCategories.map(cat => (
-                          <Badge
-                            key={cat}
-                            variant="secondary"
-                            className="text-xs cursor-pointer hover:bg-destructive/20"
-                            onClick={() => handleRemoveCategory(cat)}
-                          >
-                            {cat}
-                            <X className="h-3 w-3 ml-1" />
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="Add category..."
-                          value={newCategoryInput}
-                          onChange={e => setNewCategoryInput(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
-                          className="h-8 text-xs"
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={handleAddCategory}
-                          disabled={!newCategoryInput.trim()}
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </CollapsibleContent>
-                  </Collapsible>
                 </div>
               </div>
             )}
@@ -528,30 +481,6 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
                       </div>
                     ))}
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Rule-based Auto-tag section */}
-            {!aiPreviewOpen && (
-              <div className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 rounded-lg p-4 border border-purple-200 dark:border-purple-800">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="font-medium flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-purple-600" />
-                      Quick Auto-Tag (Rule-Based)
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Fast tagging based on genre data - no AI needed
-                    </p>
-                  </div>
-                  <Button
-                    onClick={() => handleAutoSuggestAll()}
-                    variant="outline"
-                  >
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Quick Tag
-                  </Button>
                 </div>
               </div>
             )}
