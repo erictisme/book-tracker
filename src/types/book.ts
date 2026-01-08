@@ -25,7 +25,9 @@ export type BookSource =
   | 'kindle'
   | 'kobo'
   | 'libro'
-  | 'paste';
+  | 'paste'
+  | 'readwise'
+  | 'snipd';
 
 // Shelf/Collection (like Trip in trip-scribe)
 export interface Shelf {

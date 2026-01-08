@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Tag, Pencil, Trash2, Plus, X, Check, Loader2, Brain, Eye } from 'lucide-react';
+import { Tag, Pencil, Trash2, Plus, X, Check, Loader2, Brain } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -236,9 +236,29 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
     setAiCategories(prev => prev.filter(c => c !== cat));
   }, []);
 
-  const handleAITag = useCallback(async (tagAll: boolean) => {
-    const targetBooks = tagAll ? books : booksToTag;
+  const handleAITag = useCallback(async (tagAll: boolean, sampleSize?: number) => {
+    // Prevent running if already in preview mode
+    if (aiPreviewOpen) return;
+
+    let targetBooks = tagAll ? books : booksToTag;
+
+    // If sample size specified, take a random sample of untagged books
+    if (sampleSize) {
+      const untagged = books.filter(b => !b.tags || b.tags.length === 0);
+      // Shuffle and take sample
+      const shuffled = [...untagged].sort(() => Math.random() - 0.5);
+      targetBooks = shuffled.slice(0, sampleSize);
+    }
+
     if (targetBooks.length === 0) return;
+
+    // Confirm for large batches
+    if (targetBooks.length > 50 && !sampleSize) {
+      const confirmed = window.confirm(
+        `This will use AI to tag ${targetBooks.length} books. This may take a minute and uses API credits. Continue?`
+      );
+      if (!confirmed) return;
+    }
 
     setAiLoading(true);
     setAiProgress({ processed: 0, total: targetBooks.length });
@@ -259,7 +279,7 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
     } finally {
       setAiLoading(false);
     }
-  }, [books, booksToTag, aiCategories]);
+  }, [books, booksToTag, aiCategories, aiPreviewOpen]);
 
   const handleApplySuggestions = useCallback(() => {
     aiSuggestions.forEach(suggestion => {
@@ -353,35 +373,71 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
 
                   {/* Step 2: Tag Books */}
                   <div className="pt-2 border-t">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-medium flex items-center gap-2">
-                          <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded">2</span>
-                          Tag your books
-                        </h3>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          AI will assign categories to {selectedBookIds && selectedBookIds.size > 0 ? `${selectedBookIds.size} selected` : 'all'} books
-                        </p>
-                      </div>
-                      <Button
-                        onClick={() => handleAITag(selectedBookIds && selectedBookIds.size > 0 ? false : true)}
-                        disabled={aiLoading || aiCategories.length === 0}
-                        className="bg-blue-600 hover:bg-blue-700"
-                      >
-                        {aiLoading ? (
-                          <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            {aiProgress.processed}/{aiProgress.total}
-                          </>
+                    <div>
+                      <h3 className="font-medium flex items-center gap-2 mb-2">
+                        <span className="bg-blue-600 text-white text-xs px-1.5 py-0.5 rounded">2</span>
+                        Tag your books
+                      </h3>
+                      <p className="text-xs text-muted-foreground mb-3">
+                        Test on a few books first to make sure the AI is working well, then tag all.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleAITag(false, 10)}
+                          disabled={aiLoading || aiCategories.length === 0}
+                        >
+                          {aiLoading && aiProgress.total <= 10 ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Testing...
+                            </>
+                          ) : (
+                            <>
+                              <Brain className="h-4 w-4 mr-2" />
+                              Test with 10 Books
+                            </>
+                          )}
+                        </Button>
+                        {selectedBookIds && selectedBookIds.size > 0 ? (
+                          <Button
+                            onClick={() => handleAITag(false)}
+                            disabled={aiLoading || aiCategories.length === 0}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            {aiLoading && aiProgress.total > 10 ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                {aiProgress.processed}/{aiProgress.total}
+                              </>
+                            ) : (
+                              <>
+                                <Brain className="h-4 w-4 mr-2" />
+                                Tag {selectedBookIds.size} Selected
+                              </>
+                            )}
+                          </Button>
                         ) : (
-                          <>
-                            <Brain className="h-4 w-4 mr-2" />
-                            {selectedBookIds && selectedBookIds.size > 0
-                              ? `Tag ${selectedBookIds.size} Books`
-                              : `Tag All ${books.length} Books`}
-                          </>
+                          <Button
+                            onClick={() => handleAITag(true)}
+                            disabled={aiLoading || aiCategories.length === 0}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            {aiLoading && aiProgress.total > 10 ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                {aiProgress.processed}/{aiProgress.total}
+                              </>
+                            ) : (
+                              <>
+                                <Brain className="h-4 w-4 mr-2" />
+                                Tag All {books.length} Books
+                              </>
+                            )}
+                          </Button>
                         )}
-                      </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -392,36 +448,52 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
             {aiPreviewOpen && aiSuggestions.length > 0 && (
               <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 rounded-lg p-4 border border-green-200 dark:border-green-800">
                 <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="font-medium flex items-center gap-2">
-                        <Eye className="h-4 w-4 text-green-600" />
-                        Preview AI Suggestions
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {selectedSuggestions.size} of {aiSuggestions.length} books selected
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setAiPreviewOpen(false);
-                          setAiSuggestions([]);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="bg-green-600 hover:bg-green-700"
-                        onClick={handleApplySuggestions}
-                        disabled={selectedSuggestions.size === 0}
-                      >
-                        <Check className="h-4 w-4 mr-2" />
-                        Apply Tags
-                      </Button>
+                  <div>
+                    <h3 className="font-medium flex items-center gap-2 text-green-800 dark:text-green-200">
+                      <Check className="h-4 w-4" />
+                      Review & Apply Tags
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      AI suggested tags for {aiSuggestions.length} books. Uncheck any you don't want.
+                    </p>
+                  </div>
+
+                  {/* Action buttons - always visible at top */}
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setAiPreviewOpen(false);
+                        setAiSuggestions([]);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
+                      onClick={handleApplySuggestions}
+                      disabled={selectedSuggestions.size === 0}
+                    >
+                      <Check className="h-4 w-4 mr-2" />
+                      Apply ({selectedSuggestions.size})
+                    </Button>
+                  </div>
+
+                  {/* Tag summary */}
+                  <div className="bg-white/50 dark:bg-black/20 rounded p-2">
+                    <p className="text-xs text-muted-foreground mb-1">Tags that will be applied:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from(new Set(
+                        aiSuggestions
+                          .filter(s => selectedSuggestions.has(s.bookId))
+                          .flatMap(s => s.suggestedTags)
+                      )).map(tag => (
+                        <Badge key={tag} className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                          {tag}
+                        </Badge>
+                      ))}
                     </div>
                   </div>
 
@@ -447,35 +519,48 @@ export function TagManager({ books, selectedBookIds, onUpdateBookTags, open, onO
                   </div>
 
                   {/* Suggestions list */}
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
                     {aiSuggestions.map(suggestion => (
                       <div
                         key={suggestion.bookId}
-                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                        className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
                           selectedSuggestions.has(suggestion.bookId)
-                            ? 'bg-green-100 dark:bg-green-900/30'
-                            : 'bg-muted/30 hover:bg-muted/50'
+                            ? 'bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700'
+                            : 'bg-white dark:bg-muted/30 border border-transparent hover:bg-muted/50'
                         }`}
                         onClick={() => toggleSuggestionSelection(suggestion.bookId)}
                       >
                         <Checkbox
                           checked={selectedSuggestions.has(suggestion.bookId)}
                           onCheckedChange={() => toggleSuggestionSelection(suggestion.bookId)}
+                          className="mt-0.5"
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{suggestion.title}</p>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {suggestion.suggestedTags.map(tag => (
-                              <Badge key={tag} variant="outline" className="text-xs">
-                                {tag}
-                              </Badge>
-                            ))}
-                            <span className={`text-xs ${
-                              suggestion.confidence === 'high' ? 'text-green-600' :
-                              suggestion.confidence === 'medium' ? 'text-yellow-600' : 'text-red-600'
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium truncate flex-1">{suggestion.title}</p>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              suggestion.confidence === 'high'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                : suggestion.confidence === 'medium'
+                                  ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+                                  : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
                             }`}>
-                              ({suggestion.confidence})
+                              {suggestion.confidence === 'high' ? '✓' : suggestion.confidence === 'medium' ? '~' : '?'}
                             </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {suggestion.suggestedTags.length > 0 ? (
+                              suggestion.suggestedTags.map(tag => (
+                                <Badge
+                                  key={tag}
+                                  className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200"
+                                >
+                                  {tag}
+                                </Badge>
+                              ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">No tags suggested</span>
+                            )}
                           </div>
                         </div>
                       </div>

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { BookOpen, Plus, Grid, List, Upload, BarChart3, Search, LogOut, Loader2, Check, Book as BookIcon, Trash2, X, HelpCircle, Clock, Pause, Tag, Copy, Star, Brain } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { BookOpen, Plus, Grid, List, Upload, BarChart3, Search, LogOut, Loader2, Check, Book as BookIcon, Trash2, X, HelpCircle, Clock, Pause, Tag, Copy, Star, Brain, Moon, Sun } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs';
 import {
@@ -31,7 +31,7 @@ import { BookSearch } from './components/Books/BookSearch';
 import { FinishDateDialog } from './components/Books/FinishDateDialog';
 import { Input } from './components/ui/input';
 import { BookGrid } from './components/Books/BookGrid';
-import { BookCard } from './components/Books/BookCard';
+import { BookCardGrid } from './components/Books/BookCardGrid';
 import { BookDetailModal } from './components/Books/BookDetailModal';
 import { ImportPage } from './components/Import/ImportPage';
 import { YearStats } from './components/Stats/YearStats';
@@ -53,6 +53,7 @@ import {
 type ViewMode = 'grid' | 'list';
 type FilterStatus = 'all' | BookStatus;
 type FilterSource = 'all' | BookSource;
+type SortBy = 'date_added' | 'date_finished' | 'title';
 
 function MainApp() {
   const { user, signOut } = useAuth();
@@ -60,6 +61,7 @@ function MainApp() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [filterSource, setFilterSource] = useState<FilterSource>('all');
+  const [sortBy, setSortBy] = useState<SortBy>('date_added');
   const [searchOpen, setSearchOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -72,6 +74,24 @@ function MainApp() {
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [duplicateFinderOpen, setDuplicateFinderOpen] = useState(false);
   const [showCurrentlyReading, setShowCurrentlyReading] = useState(true);
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('theme') === 'dark' ||
+        (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+    return false;
+  });
+
+  // Apply dark mode class
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDark]);
 
   const handleAddBook = (input: CreateBookInput) => {
     addBook(input);
@@ -223,8 +243,24 @@ function MainApp() {
       );
     }
 
+    // Sort
+    result = [...result].sort((a, b) => {
+      if (sortBy === 'title') {
+        return a.title.localeCompare(b.title);
+      } else if (sortBy === 'date_finished') {
+        const dateA = a.date_finished ? new Date(a.date_finished).getTime() : 0;
+        const dateB = b.date_finished ? new Date(b.date_finished).getTime() : 0;
+        return dateB - dateA; // newest first
+      } else {
+        // date_added (default)
+        const dateA = a.date_added ? new Date(a.date_added).getTime() : 0;
+        const dateB = b.date_added ? new Date(b.date_added).getTime() : 0;
+        return dateB - dateA; // newest first
+      }
+    });
+
     return result;
-  }, [books, filterStatus, filterSource, searchQuery]);
+  }, [books, filterStatus, filterSource, searchQuery, sortBy]);
 
   const statusCounts = {
     all: books.length,
@@ -315,6 +351,16 @@ function MainApp() {
                   <BookSearch onAddBook={handleAddBook} />
                 </DialogContent>
               </Dialog>
+
+              {/* Dark mode toggle */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsDark(!isDark)}
+                title={isDark ? 'Light mode' : 'Dark mode'}
+              >
+                {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
 
               {/* User menu */}
               <DropdownMenu>
@@ -532,6 +578,18 @@ function MainApp() {
               </SelectContent>
             </Select>
 
+            {/* Sort dropdown */}
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortBy)}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date_added">Date added</SelectItem>
+                <SelectItem value="date_finished">Date finished</SelectItem>
+                <SelectItem value="title">Title A-Z</SelectItem>
+              </SelectContent>
+            </Select>
+
             {/* View toggle */}
             <div className="flex gap-1">
             <Button
@@ -566,44 +624,80 @@ function MainApp() {
               <span className="ml-auto text-xs">{showCurrentlyReading ? '▼' : '▶'}</span>
             </button>
             {showCurrentlyReading && (
-              <div className="flex flex-wrap gap-3">
-                {books.filter(b => b.status === 'reading').map(book => (
-                  <div
-                    key={book.id}
-                    className="flex items-center gap-3 bg-white dark:bg-gray-900 rounded-lg p-2 pr-3 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => setEditingBook(book)}
-                  >
-                    {book.cover_url ? (
-                      <img src={book.cover_url} alt={book.title} className="w-10 h-14 object-cover rounded" />
-                    ) : (
-                      <div className="w-10 h-14 bg-muted rounded flex items-center justify-center">
-                        <BookIcon className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate max-w-[150px]">{book.title}</p>
-                      <p className="text-xs text-muted-foreground truncate max-w-[150px]">{book.authors[0]}</p>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="ml-2 bg-green-500 hover:bg-green-600 text-white h-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStatusChange(book.id, 'finished');
-                      }}
+              viewMode === 'grid' ? (
+                <div className="flex flex-wrap gap-3">
+                  {books.filter(b => b.status === 'reading').map(book => (
+                    <div
+                      key={book.id}
+                      className="flex items-center gap-3 bg-white dark:bg-gray-900 rounded-lg p-2 pr-3 shadow-sm cursor-pointer hover:shadow-md transition-shadow"
+                      onClick={() => setEditingBook(book)}
                     >
-                      <Check className="h-3 w-3 mr-1" />
-                      Finish
-                    </Button>
-                  </div>
-                ))}
-              </div>
+                      {book.cover_url ? (
+                        <img src={book.cover_url} alt={book.title} className="w-10 h-14 object-cover rounded" />
+                      ) : (
+                        <div className="w-10 h-14 bg-muted rounded flex items-center justify-center">
+                          <BookIcon className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate max-w-[150px]">{book.title}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">{book.authors[0]}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="ml-2 bg-green-500 hover:bg-green-600 text-white h-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStatusChange(book.id, 'finished');
+                        }}
+                      >
+                        <Check className="h-3 w-3 mr-1" />
+                        Finish
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {books.filter(b => b.status === 'reading').map(book => (
+                    <div
+                      key={book.id}
+                      className="flex items-center gap-3 py-2 px-3 cursor-pointer hover:bg-yellow-100/50 dark:hover:bg-yellow-900/30 rounded-md transition-colors group"
+                      onClick={() => setEditingBook(book)}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <span className="font-medium">{book.title}</span>
+                        <span className="text-muted-foreground mx-2">—</span>
+                        <span className="text-sm text-muted-foreground">{book.authors.join(', ')}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="bg-green-500 hover:bg-green-600 text-white h-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStatusChange(book.id, 'finished');
+                        }}
+                      >
+                        <Check className="h-4 w-4 mr-1" />
+                        Finish
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )
             )}
           </div>
         )}
 
         {/* Books display */}
         {viewMode === 'grid' ? (
+          <BookCardGrid
+            books={filteredBooks}
+            onStatusChange={handleStatusChange}
+            onEdit={setEditingBook}
+            onDelete={handleDeleteBook}
+          />
+        ) : (
           <BookGrid
             books={filteredBooks}
             onStatusChange={handleStatusChange}
@@ -612,26 +706,6 @@ function MainApp() {
             selectedIds={selectedIds}
             onSelectionChange={setSelectedIds}
           />
-        ) : (
-          <div className="space-y-3">
-            {filteredBooks.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <BookOpen className="h-12 w-12 mb-4" />
-                <p className="text-lg font-medium">No books yet</p>
-                <p className="text-sm">Search and add your first book!</p>
-              </div>
-            ) : (
-              filteredBooks.map(book => (
-                <BookCard
-                  key={book.id}
-                  book={book}
-                  onStatusChange={(status) => handleStatusChange(book.id, status)}
-                  onEdit={() => setEditingBook(book)}
-                  onDelete={() => handleDeleteBook(book.id)}
-                />
-              ))
-            )}
-          </div>
         )}
       </main>
 

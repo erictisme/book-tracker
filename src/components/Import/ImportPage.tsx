@@ -13,6 +13,7 @@ import { importGoodreadsCSV } from '../../services/goodreadsImport';
 import { importLibbyCSV } from '../../services/libbyImport';
 import { importKindleText } from '../../services/kindleImport';
 import { importKoboLibrary } from '../../services/koboImport';
+import { importReadwiseCSV, classifyReadwiseBooksWithGoogleBooks } from '../../services/readwiseImport';
 import { batchEnrichBooks } from '../../services/googleBooksApi';
 import { parseWithAI, isAIParsingAvailable } from '../../services/aiParser';
 import {
@@ -22,6 +23,7 @@ import {
   type BookHighlights,
   type HighlightImportResult,
 } from '../../services/kindleHighlightsImport';
+import { isDuplicateOfExisting } from '../../services/dedupeUtil';
 import type { CreateBookInput, ImportResult, Book } from '../../types/book';
 
 interface ImportPageProps {
@@ -31,7 +33,7 @@ interface ImportPageProps {
   onUpdateHighlights?: (bookId: string, highlights: string[]) => void;
 }
 
-type ImportSource = 'goodreads' | 'libby' | 'kindle' | 'kobo' | 'other' | 'highlights';
+type ImportSource = 'goodreads' | 'libby' | 'kindle' | 'kobo' | 'readwise' | 'other' | 'highlights';
 
 export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHighlights }: ImportPageProps) {
   const [activeTab, setActiveTab] = useState<ImportSource>('goodreads');
@@ -49,11 +51,43 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
   const [isEnriching, setIsEnriching] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState({ current: 0, total: 0 });
   const [isAIParsing, setIsAIParsing] = useState(false);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classifyProgress, setClassifyProgress] = useState({ current: 0, total: 0 });
+  const [previewFilter, setPreviewFilter] = useState<'all' | 'new' | 'merge' | 'skip' | 'podcast'>('all');
+
+  // Toggle classification between book and non-book
+  const toggleClassification = useCallback((index: number) => {
+    setPreview(prev => {
+      const updated = [...prev];
+      const book = updated[index];
+
+      if (book.source === 'snipd') {
+        // Currently non-book → make it a book
+        const tags = (book.tags || []).filter(t => t !== 'podcast' && t !== 'article');
+        updated[index] = {
+          ...book,
+          source: 'readwise',
+          tags: tags.length > 0 ? tags : undefined,
+        };
+      } else {
+        // Currently a book → make it non-book (article)
+        const tags = new Set(book.tags || []);
+        tags.add('article');
+        updated[index] = {
+          ...book,
+          source: 'snipd',
+          tags: Array.from(tags),
+        };
+      }
+      return updated;
+    });
+  }, []);
 
   const processFile = useCallback(async (file: File, source: ImportSource) => {
     setError(null);
     setResult(null);
     setHighlightResult(null);
+    setPreviewFilter('all');
 
     try {
       const text = await file.text();
@@ -71,6 +105,22 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
           books = importGoodreadsCSV(text);
         } else if (source === 'libby') {
           books = importLibbyCSV(text);
+        } else if (source === 'readwise') {
+          books = importReadwiseCSV(text);
+
+          // Use Google Books API to classify books vs podcasts (scalable approach)
+          // If a title exists on Google Books, it's a book; otherwise likely a podcast
+          setIsClassifying(true);
+          setClassifyProgress({ current: 0, total: books.length });
+          try {
+            books = await classifyReadwiseBooksWithGoogleBooks(
+              books,
+              (current, total) => setClassifyProgress({ current, total })
+            );
+          } catch (err) {
+            console.warn('Google Books classification failed, using heuristics:', err);
+          }
+          setIsClassifying(false);
         } else {
           books = importKindleText(text);
         }
@@ -339,7 +389,9 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
           <Check className="h-4 w-4" />
           <AlertTitle>Import Complete</AlertTitle>
           <AlertDescription>
-            Added {result.added} books, skipped {result.skipped} duplicates.
+            Added {result.added} new books
+            {result.merged > 0 && `, merged highlights into ${result.merged} existing books`}
+            {result.skipped > 0 && `, skipped ${result.skipped} already synced`}.
             {result.errors.length > 0 && (
               <span className="block mt-1 text-destructive">
                 {result.errors.length} errors occurred.
@@ -365,12 +417,14 @@ export function ImportPage({ onImport, onClose, existingBooks = [], onUpdateHigh
         setResult(null);
         setHighlightResult(null);
         setError(null);
+        setPreviewFilter('all');
       }}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-7">
           <TabsTrigger value="goodreads">Goodreads</TabsTrigger>
           <TabsTrigger value="libby">Libby</TabsTrigger>
           <TabsTrigger value="kindle">Kindle</TabsTrigger>
           <TabsTrigger value="kobo">Kobo</TabsTrigger>
+          <TabsTrigger value="readwise">Readwise</TabsTrigger>
           <TabsTrigger value="other">Other</TabsTrigger>
           <TabsTrigger value="highlights">Highlights</TabsTrigger>
         </TabsList>
@@ -534,6 +588,48 @@ Unread
           </Card>
         </TabsContent>
 
+        {/* Readwise Tab */}
+        <TabsContent value="readwise">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Import from Readwise
+                {isClassifying && (
+                  <span className="text-sm font-normal text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Analyzing ({classifyProgress.current}/{classifyProgress.total})...
+                  </span>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Export your highlights from Readwise (readwise.io/export → CSV) and upload the file.
+                This imports books with all your highlights attached. You can toggle book/podcast for any item.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <label
+                className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                  isDragging ? 'border-primary bg-primary/10' : 'hover:bg-accent'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, 'readwise')}
+              >
+                <Upload className={`h-8 w-8 mb-2 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                <span className="text-sm text-muted-foreground">
+                  Drag & drop or click to upload readwise-data.csv
+                </span>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => handleFileUpload(e, 'readwise')}
+                />
+              </label>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Other Tab - AI Powered */}
         <TabsContent value="other">
           <Card>
@@ -631,40 +727,215 @@ Example formats AI can understand:
       {preview.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Preview ({preview.length} books)</CardTitle>
+            <CardTitle className="text-base">
+              Preview ({preview.length} books)
+              {activeTab === 'readwise' && (
+                <span className="font-normal text-muted-foreground ml-2">
+                  • {preview.reduce((sum, b) => sum + (b.highlights?.length || 0), 0).toLocaleString()} highlights
+                </span>
+              )}
+            </CardTitle>
+            {/* Show breakdown for Readwise imports - clickable filters */}
+            {activeTab === 'readwise' && existingBooks.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {(() => {
+                  let newCount = 0;
+                  let mergeCount = 0;
+                  let skipCount = 0;
+                  let podcastCount = 0;
+                  for (const book of preview) {
+                    // Count podcasts separately
+                    if (book.source === 'snipd') {
+                      podcastCount++;
+                      continue; // Don't count podcasts in new/merge/skip
+                    }
+                    const existing = isDuplicateOfExisting(book, existingBooks);
+                    if (!existing) {
+                      newCount++;
+                    } else if (book.highlights && book.highlights.length > 0) {
+                      const existingHighlights = existing.highlights || [];
+                      const newHighlights = book.highlights.filter(h => !existingHighlights.includes(h));
+                      if (newHighlights.length > 0) {
+                        mergeCount++;
+                      } else {
+                        skipCount++;
+                      }
+                    } else {
+                      skipCount++;
+                    }
+                  }
+                  return (
+                    <>
+                      <Badge
+                        variant={previewFilter === 'all' ? 'default' : 'outline'}
+                        className="cursor-pointer"
+                        onClick={() => setPreviewFilter('all')}
+                      >
+                        All ({preview.length})
+                      </Badge>
+                      {newCount > 0 && (
+                        <Badge
+                          variant={previewFilter === 'new' ? 'default' : 'outline'}
+                          className={`cursor-pointer ${previewFilter === 'new' ? 'bg-green-600' : 'hover:bg-green-600/20'}`}
+                          onClick={() => setPreviewFilter('new')}
+                        >
+                          {newCount} new
+                        </Badge>
+                      )}
+                      {mergeCount > 0 && (
+                        <Badge
+                          variant={previewFilter === 'merge' ? 'default' : 'outline'}
+                          className={`cursor-pointer ${previewFilter === 'merge' ? 'bg-blue-600' : 'hover:bg-blue-600/20'}`}
+                          onClick={() => setPreviewFilter('merge')}
+                        >
+                          {mergeCount} merge
+                        </Badge>
+                      )}
+                      {skipCount > 0 && (
+                        <Badge
+                          variant={previewFilter === 'skip' ? 'default' : 'outline'}
+                          className="cursor-pointer"
+                          onClick={() => setPreviewFilter('skip')}
+                        >
+                          {skipCount} synced
+                        </Badge>
+                      )}
+                      {podcastCount > 0 && (
+                        <Badge
+                          variant={previewFilter === 'podcast' ? 'default' : 'outline'}
+                          className={`cursor-pointer ${previewFilter === 'podcast' ? 'bg-purple-600' : 'border-purple-500 text-purple-500 hover:bg-purple-600/20'}`}
+                          onClick={() => setPreviewFilter('podcast')}
+                        >
+                          {podcastCount} non-books
+                        </Badge>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <ScrollArea className="h-[300px]">
               <div className="space-y-2">
-                {preview.slice(0, 50).map((book, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 p-2 rounded border"
-                  >
-                    {book.cover_url ? (
-                      <img
-                        src={book.cover_url}
-                        alt={book.title}
-                        className="w-8 h-12 object-cover rounded flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-8 h-12 bg-muted rounded flex items-center justify-center flex-shrink-0">
-                        <BookIcon className="h-4 w-4 text-muted-foreground" />
+                {preview
+                  .map((book, originalIndex) => {
+                    // Calculate status for each book
+                    let status: 'new' | 'merge' | 'skip' | null = null;
+                    if (activeTab === 'readwise' && existingBooks.length > 0) {
+                      const existing = isDuplicateOfExisting(book, existingBooks);
+                      if (!existing) {
+                        status = 'new';
+                      } else if (book.highlights && book.highlights.length > 0) {
+                        const existingHighlights = existing.highlights || [];
+                        const newHighlights = book.highlights.filter(h => !existingHighlights.includes(h));
+                        status = newHighlights.length > 0 ? 'merge' : 'skip';
+                      } else {
+                        status = 'skip';
+                      }
+                    }
+                    return { book, status, originalIndex };
+                  })
+                  .filter(({ book, status }) => {
+                    // Apply filter
+                    if (previewFilter === 'all') return true;
+                    if (previewFilter === 'podcast') return book.source === 'snipd';
+                    // For new/merge/skip, exclude podcasts
+                    if (book.source === 'snipd') return false;
+                    return status === previewFilter;
+                  })
+                  .slice(0, 50)
+                  .map(({ book, status, originalIndex }) => (
+                    <div
+                      key={originalIndex}
+                      className={`flex items-center gap-2 p-2 rounded border ${
+                        status === 'skip' ? 'opacity-50' : ''
+                      }`}
+                    >
+                      {book.cover_url ? (
+                        <img
+                          src={book.cover_url}
+                          alt={book.title}
+                          className="w-8 h-12 object-cover rounded flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-12 bg-muted rounded flex items-center justify-center flex-shrink-0">
+                          <BookIcon className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{book.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {book.authors.join(', ')}
+                        </p>
                       </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{book.title}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {book.authors.join(', ')}
-                      </p>
+                      {/* Clickable toggle for book/non-book classification */}
+                      {activeTab === 'readwise' && (
+                        <Badge
+                          variant="outline"
+                          className={`flex-shrink-0 text-xs cursor-pointer hover:opacity-80 ${
+                            book.source === 'snipd'
+                              ? book.tags?.includes('article')
+                                ? 'border-orange-500 text-orange-500 hover:bg-orange-500/10'
+                                : 'border-purple-500 text-purple-500 hover:bg-purple-500/10'
+                              : 'border-green-600 text-green-600 hover:bg-green-600/10'
+                          }`}
+                          onClick={() => toggleClassification(originalIndex)}
+                          title="Click to toggle book/non-book"
+                        >
+                          {book.source === 'snipd'
+                            ? book.tags?.includes('article') ? '📄' : '🎙️'
+                            : '📚'
+                          }
+                        </Badge>
+                      )}
+                      {status === 'new' && (
+                        <Badge variant="default" className="flex-shrink-0 text-xs bg-green-600">
+                          New
+                        </Badge>
+                      )}
+                      {status === 'merge' && (
+                        <Badge variant="secondary" className="flex-shrink-0 text-xs bg-blue-600 text-white">
+                          +Highlights
+                        </Badge>
+                      )}
+                      {status === 'skip' && (
+                        <Badge variant="outline" className="flex-shrink-0 text-xs">
+                          Synced
+                        </Badge>
+                      )}
+                      {book.highlights && book.highlights.length > 0 && (
+                        <Badge variant="secondary" className="flex-shrink-0 text-xs">
+                          {book.highlights.length}
+                        </Badge>
+                      )}
                     </div>
-                  </div>
-                ))}
-                {preview.length > 50 && (
-                  <p className="text-center text-sm text-muted-foreground py-2">
-                    ...and {preview.length - 50} more books
-                  </p>
-                )}
+                  ))}
+                {(() => {
+                  const filteredCount = preview.filter((book) => {
+                    if (previewFilter === 'all') return true;
+                    if (previewFilter === 'podcast') return book.source === 'snipd';
+                    // For new/merge/skip, exclude podcasts
+                    if (book.source === 'snipd') return false;
+                    const existing = isDuplicateOfExisting(book, existingBooks);
+                    let status: 'new' | 'merge' | 'skip' = 'new';
+                    if (existing) {
+                      if (book.highlights && book.highlights.length > 0) {
+                        const existingHighlights = existing.highlights || [];
+                        const newHighlights = book.highlights.filter(h => !existingHighlights.includes(h));
+                        status = newHighlights.length > 0 ? 'merge' : 'skip';
+                      } else {
+                        status = 'skip';
+                      }
+                    }
+                    return status === previewFilter;
+                  }).length;
+                  return filteredCount > 50 ? (
+                    <p className="text-center text-sm text-muted-foreground py-2">
+                      ...and {filteredCount - 50} more {previewFilter === 'podcast' ? 'non-books' : 'books'}
+                    </p>
+                  ) : null;
+                })()}
               </div>
             </ScrollArea>
           </CardContent>

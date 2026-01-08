@@ -226,6 +226,73 @@ Return ONLY valid JSON, no explanation.`;
 }
 
 /**
+ * Use AI to classify entries as books vs podcasts
+ * Returns array of booleans (true = podcast)
+ */
+export async function classifyPodcastsWithAI(
+  entries: Array<{ title: string; author: string }>
+): Promise<boolean[]> {
+  if (!GEMINI_API_KEY || entries.length === 0) {
+    return entries.map(() => false);
+  }
+
+  // Format entries for the prompt
+  const entriesList = entries.map((e, i) => `${i}. "${e.title}" by "${e.author}"`).join('\n');
+
+  const prompt = `Classify each entry as BOOK (false) or PODCAST/ARTICLE (true).
+
+BOOK (false) = Published book you can buy on Amazon/bookstores. Has a real author name.
+Examples of BOOKS:
+- "Deep Learning for Coders with fastai and PyTorch" by "Jeremy Howard" → false (technical book)
+- "The Screwtape Letters" by "C. S. Lewis" → false (classic book)
+- "Working Identity" by "Herminia Ibarra" → false (business book)
+- "Culture Making" by "Andy Crouch" → false (Christian book)
+
+PODCAST/ARTICLE (true) = Podcast episode, newsletter, video, online guide chapter. Author is usually a show/publication name.
+Examples of PODCASTS:
+- "Part 3: Three ways anyone can make a difference" by "The 80,000 Hours Career Guide" → true (guide chapter)
+- "147. On Hell" by "Undeceptions with John Dickson" → true (podcast episode with number)
+- "Dan Sundheim of D1 Capital on investing" by "Cheeky Pint" → true (podcast interview)
+- "Seeing The Future from AI Companions" by "The a16z Show" → true (podcast)
+- "Why Trump Just Gave China the Keys" by "The Daily" → true (news podcast)
+
+KEY SIGNALS FOR PODCAST:
+- Author contains "Podcast", "Show", "Daily", "Guide", "Reads"
+- Title starts with "Part X:" or episode number "147."
+- Title mentions specific people being interviewed "X on Y"
+
+Entries to classify:
+${entriesList}
+
+Return ONLY a JSON array of ${entries.length} booleans (true=podcast, false=book).
+Example format: [false, true, false, true]`;
+
+  try {
+    const content = await callGemini(prompt);
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.error('No JSON found in podcast classification response');
+      return entries.map(() => false);
+    }
+
+    const result = JSON.parse(jsonMatch[0]);
+
+    // Validate length
+    if (result.length !== entries.length) {
+      console.warn(`AI returned ${result.length} results for ${entries.length} entries`);
+      // Pad or trim to match
+      while (result.length < entries.length) result.push(false);
+      return result.slice(0, entries.length);
+    }
+
+    return result;
+  } catch (error) {
+    console.error('AI podcast classification failed:', error);
+    return entries.map(() => false);
+  }
+}
+
+/**
  * Use AI to find potential duplicate groups that heuristics might miss
  */
 export async function findDuplicatesWithAI(books: Book[]): Promise<string[][]> {

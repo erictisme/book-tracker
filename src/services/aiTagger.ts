@@ -147,31 +147,56 @@ ONLY output the JSON array, nothing else.`;
   );
 
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Gemini API error response:', errorText);
     throw new Error(`Gemini API error: ${response.status}`);
   }
 
   const data = await response.json();
   const content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
+  if (!content) {
+    console.error('Empty response from Gemini:', data);
+    throw new Error('Empty response from AI');
+  }
+
   // Parse JSON from response
   const jsonMatch = content.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
+    console.error('No JSON found in response:', content);
     throw new Error('No JSON array found in response');
   }
 
-  const parsed = JSON.parse(jsonMatch[0]) as Array<{
+  let parsed: Array<{
     index: number;
     tags: string[];
     confidence: 'high' | 'medium' | 'low';
   }>;
 
-  // Map back to book IDs
-  return parsed.map(item => ({
-    bookId: books[item.index - 1]?.id || '',
-    title: books[item.index - 1]?.title || '',
-    suggestedTags: item.tags.filter(t => categories.includes(t)), // Only keep valid tags
-    confidence: item.confidence,
-  })).filter(s => s.bookId); // Remove any invalid mappings
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch (parseError) {
+    console.error('Failed to parse JSON:', jsonMatch[0]);
+    throw new Error('Failed to parse AI response as JSON');
+  }
+
+  // Map back to book IDs with case-insensitive tag matching
+  const categoriesLower = categories.map(c => c.toLowerCase());
+
+  return parsed.map(item => {
+    // Normalize tags to match categories (case-insensitive)
+    const normalizedTags = (item.tags || [])
+      .map(t => t.toLowerCase())
+      .filter(t => categoriesLower.includes(t))
+      .map(t => categories.find(c => c.toLowerCase() === t) || t); // Use original category casing
+
+    return {
+      bookId: books[item.index - 1]?.id || '',
+      title: books[item.index - 1]?.title || '',
+      suggestedTags: normalizedTags,
+      confidence: item.confidence || 'medium',
+    };
+  }).filter(s => s.bookId && s.suggestedTags.length > 0); // Remove invalid or empty mappings
 }
 
 /**

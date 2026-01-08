@@ -275,13 +275,30 @@ export function useBooks() {
       const now = new Date().toISOString();
       const booksToInsert: Record<string, unknown>[] = [];
 
+      const booksToMergeHighlights: { bookId: string; newHighlights: string[] }[] = [];
+
       for (const input of dedupedInputs) {
         try {
           // Check for existing book in database
           const existing = isDuplicateOfExisting(input, books);
 
           if (existing) {
-            result.skipped++;
+            // If input has highlights, merge them into existing book
+            if (input.highlights && input.highlights.length > 0) {
+              const existingHighlights = existing.highlights || [];
+              const newHighlights = input.highlights.filter(h => !existingHighlights.includes(h));
+              if (newHighlights.length > 0) {
+                booksToMergeHighlights.push({
+                  bookId: existing.id,
+                  newHighlights: [...existingHighlights, ...newHighlights],
+                });
+                result.merged++;
+              } else {
+                result.skipped++;
+              }
+            } else {
+              result.skipped++;
+            }
             continue;
           }
 
@@ -360,6 +377,34 @@ export function useBooks() {
         if (allNewBooks.length > 0) {
           setBooks(prev => [...allNewBooks, ...prev]);
         }
+      }
+
+      // Merge highlights into existing books
+      if (booksToMergeHighlights.length > 0) {
+        for (const { bookId, newHighlights } of booksToMergeHighlights) {
+          const { error } = await supabase
+            .from('books')
+            .update({ highlights: newHighlights, updated_at: new Date().toISOString() })
+            .eq('id', bookId)
+            .eq('user_id', user.id);
+
+          if (error) {
+            console.error('Failed to merge highlights:', error);
+            result.errors.push(`Failed to merge highlights for book ${bookId}`);
+            result.merged--; // Undo the merged count
+          }
+        }
+
+        // Update local state
+        setBooks(prev =>
+          prev.map(book => {
+            const merge = booksToMergeHighlights.find(m => m.bookId === book.id);
+            if (merge) {
+              return { ...book, highlights: merge.newHighlights };
+            }
+            return book;
+          })
+        );
       }
 
       return result;

@@ -6,6 +6,12 @@ import type { CreateBookInput, Book } from '../types/book';
 export function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
+    // Remove common edition/version suffixes
+    .replace(/\s*\(.*?edition.*?\)/gi, '')
+    .replace(/\s*\(.*?version.*?\)/gi, '')
+    .replace(/\s*,?\s*(expanded|enhanced|revised|updated|complete|unabridged)\s*edition/gi, '')
+    .replace(/\s*\(goodreads author\)/gi, '')
+    // Remove punctuation and normalize spaces
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -25,13 +31,86 @@ export function getCoreTitle(title: string): string {
 
 /**
  * Normalize author for comparison
+ * Handles variations like "C. S. Lewis" vs "C.S. Lewis" vs "CS Lewis"
  */
 export function normalizeAuthor(author: string): string {
   return author
     .toLowerCase()
+    // Remove common suffixes
+    .replace(/\s*\(.*?\)\s*/g, '') // Remove parenthetical (Goodreads Author)
+    .replace(/,?\s*(jr\.?|sr\.?|ph\.?d\.?|md|ii|iii|iv)$/gi, '')
+    // Remove all punctuation and extra spaces
     .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Get author's last name for comparison
+ */
+export function getAuthorLastName(author: string): string {
+  const normalized = normalizeAuthor(author);
+  const parts = normalized.split(' ');
+  // Return last part (last name)
+  return parts[parts.length - 1] || normalized;
+}
+
+/**
+ * Calculate simple similarity between two strings (0-1)
+ */
+function stringSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+
+  const longer = a.length > b.length ? a : b;
+  const shorter = a.length > b.length ? b : a;
+
+  if (longer.length === 0) return 1;
+
+  // Check if shorter is contained in longer
+  if (longer.includes(shorter)) {
+    return shorter.length / longer.length;
+  }
+
+  // Simple word overlap
+  const wordsA = new Set(a.split(' '));
+  const wordsB = new Set(b.split(' '));
+  let matches = 0;
+  for (const word of wordsA) {
+    if (wordsB.has(word)) matches++;
+  }
+  const totalWords = Math.max(wordsA.size, wordsB.size);
+  return totalWords > 0 ? matches / totalWords : 0;
+}
+
+/**
+ * Check if two authors are likely the same person
+ */
+function authorsMatch(authorsA: string[], authorsB: string[]): boolean {
+  const normalizedA = authorsA.map(normalizeAuthor).filter(Boolean);
+  const normalizedB = authorsB.map(normalizeAuthor).filter(Boolean);
+
+  // Get last names too for fallback matching
+  const lastNamesA = authorsA.map(getAuthorLastName).filter(Boolean);
+  const lastNamesB = authorsB.map(getAuthorLastName).filter(Boolean);
+
+  // Check if any author matches
+  return normalizedA.some(authorA =>
+    normalizedB.some(authorB => {
+      if (!authorA || !authorB) return false;
+      // Exact match after normalization
+      if (authorA === authorB) return true;
+      // One contains the other (handles "C S Lewis" vs "Clive Staples Lewis")
+      if (authorA.includes(authorB) || authorB.includes(authorA)) return true;
+      return false;
+    })
+  ) || lastNamesA.some(lastA =>
+    lastNamesB.some(lastB => {
+      // Last name match (handles different first name formats)
+      if (lastA && lastB && lastA.length >= 3 && lastA === lastB) return true;
+      return false;
+    })
+  );
 }
 
 /**
@@ -47,19 +126,8 @@ export function isSameBook(
     return true;
   }
 
-  // Normalize authors for comparison
-  const authorsA = a.authors.map(normalizeAuthor);
-  const authorsB = b.authors.map(normalizeAuthor);
-
-  // Check if any author matches (one contains the other)
-  const authorMatches = authorsA.some(authorA =>
-    authorsB.some(authorB => {
-      if (!authorA || !authorB) return false;
-      return authorA.includes(authorB) || authorB.includes(authorA);
-    })
-  );
-
-  if (!authorMatches) return false;
+  // Check if authors match
+  if (!authorsMatch(a.authors, b.authors)) return false;
 
   // Full normalized title match
   const titleA = normalizeTitle(a.title);
@@ -75,6 +143,10 @@ export function isSameBook(
   if (titleA.length >= 5 && titleB.length >= 5) {
     if (titleA.includes(titleB) || titleB.includes(titleA)) return true;
   }
+
+  // Fuzzy match: high word overlap with same author
+  const similarity = stringSimilarity(coreA, coreB);
+  if (similarity >= 0.7 && coreA.length >= 5) return true;
 
   return false;
 }
